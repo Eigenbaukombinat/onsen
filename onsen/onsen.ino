@@ -1,35 +1,94 @@
 #include <OneWire.h>
 #include <LiquidCrystal.h>
 
-// OneWire DS18S20, DS18B20, DS1822 Temperature Example
-// Das Relays hängt an D2
-// Der Drehencoder liegt auf den Pins D11 und D12, dessen Taster an D10, alle mit Pullupwiderstand auf Plus
-// Hintergrundbeleuchtung an Pin D9
+const int RELAY_PIN = 2; // relay
+const int BACKLIGHT_PIN = 9; // baclight enable
+const int BUTTON_PIN = 10; // rotary encoder button
+const int ENCODER_DIR_A_PIN = 11; // rotary encoder dieection A
+const int ENCODER_DIR_B_PIN = 12; // rotary encoder dieection B
 
-OneWire ds(A0); // on pin A0 (a 4.7K resistor is necessary) Ohne geht es eh nicht
+const int SLOW_REGULATION_TEMP = 60;
+const int LOW_TEMP = 64;
+const int TARGET_TEMP = 66;
+const int PANIC_TEMP = 67.5;
+
+const int STATE_IDLE = 0;
+const int STATE_HEATUP = 1;
+
+const int SLOW_INTERVAL = 5;
+
+// on pin A0 (a 4.7K resistor is necessary), won't work without
+OneWire ds(A0); 
 LiquidCrystal lcd(3, 4, 5, 6, 7, 8);
 
+int state = STATE_IDLE;
+int interval = 10; // s
+
 void setup(void) {
-  pinMode(9, OUTPUT);
-  digitalWrite(9, HIGH);
+  // setup relay control, init to off
+  digitalWrite(RELAY_PIN, LOW);
+  pinMode(RELAY_PIN, OUTPUT);
+  
+  // enable backlight
+  pinMode(BACKLIGHT_PIN, OUTPUT);
+  digitalWrite(BACKLIGHT_PIN, HIGH);
+  
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
   Serial.begin(9600);
 }
 
 void loop(void) {
+  float celsius = readTemperature();
+  
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(celsius);
+  lcd.print(" C");
+  lcd.setCursor(0, 1);
+
+  if (state == STATE_IDLE) {
+    if (celsius < LOW_TEMP) {
+        state = STATE_HEATUP;
+        interval = 15;
+    }
+  }
+  
+  if (state == STATE_HEATUP) {   
+    if (celsius < LOW_TEMP) {
+      digitalWrite(RELAY_PIN, HIGH);
+      lcd.print("Heating");      
+    } else {
+      digitalWrite(RELAY_PIN, LOW);
+      lcd.print("Cooling");
+    }
+    
+    if (celsius > SLOW_REGULATION_TEMP)
+    {
+      interval = SLOW_INTERVAL;
+      lcd.print(" slow");
+    }
+  }
+
+  for (int i = 0; i < interval; i++) {
+    delay(1000);
+  }
+}
+
+float readTemperature() 
+{
   byte i;
   byte present = 0;
   byte type_s;
   byte data[12];
   byte addr[8];
-  float celsius, fahrenheit;
+  
   if (!ds.search(addr)) {
     Serial.println("No more addresses.");
     Serial.println();
     ds.reset_search();
     delay(250);
-    return;
+    return  -1;
   }
   
   Serial.print("ROM =");
@@ -40,7 +99,7 @@ void loop(void) {
   
   if (OneWire::crc8(addr, 7) != addr[7]) {
     Serial.println("CRC is not valid!");
-    return;
+    return -2;
   }
   
   Serial.println();
@@ -60,7 +119,7 @@ void loop(void) {
       break;
     default:
       Serial.println("Device is not a DS18x20 family device.");
-      return;
+      return -3;
   }
   
   ds.reset();
@@ -105,13 +164,6 @@ void loop(void) {
     //// default is 12 bit resolution, 750 ms conversion time
   }
   
-  celsius = (float)raw / 16.0;
-  fahrenheit = celsius * 1.8 + 32.0;
-  lcd.setCursor(0, 0);
-  lcd.print("ist Temperature");
-  lcd.setCursor(0, 1);
-  lcd.print(celsius);
-  lcd.print(" Celsius, ");
-  Serial.print(fahrenheit);
-  Serial.println(" Fahrenheit");
+  float celsius = (float)raw / 16.0;
+  return celsius;
 }
